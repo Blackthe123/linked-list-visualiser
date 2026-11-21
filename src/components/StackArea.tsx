@@ -3,17 +3,18 @@ import type { StackFrame } from '../state/types';
 
 interface StackAreaProps {
   stack: StackFrame[];
+  width: number;
   highlightedAddresses: string[];
 }
 
 const show = (v: unknown) => (v === null || v === undefined ? 'NULL' : String(v));
 
-export const StackArea: React.FC<StackAreaProps> = ({ stack, highlightedAddresses }) => {
+export const StackArea: React.FC<StackAreaProps> = ({ stack, width, highlightedAddresses }) => {
   // Draw the most recent call at the top, main at the bottom
   const frames = [...stack].reverse();
 
   return (
-    <div className="stack-area">
+    <div className="stack-area" style={{ flex: `0 1 ${width}px` }}>
       <div className="area-title">Stack</div>
       <div className="stack-frames">
         {frames.map((frame, i) => {

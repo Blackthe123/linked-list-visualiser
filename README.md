@@ -57,6 +57,7 @@ Five tabs (`insert_at_index`, `delete_node`, `free_list`, `reverse_list`, `find_
 ### Resizable Panels
 - Drag the **vertical splitter** to resize the controls/code panel against the canvas.
 - Drag the **horizontal splitter** above the stack and heap to resize that panel.
+- Drag the **splitter between the stack and heap** to give the stack more room during recursion.
 
 ---
 

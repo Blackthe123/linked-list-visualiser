@@ -24,7 +24,7 @@ const NODE_W = 90;
 const NODE_H = 60;
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 4;
-const LASER_FADE_MS = 700;
+const LASER_FADE_MS = 280;
 const ERASER_RADIUS = 12; // screen pixels
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -421,7 +421,7 @@ export const WorkArea: React.FC<WorkAreaProps> = ({ nodes, variables, highlighte
           key={`${b.t}-${i}`}
           x1={a.x} y1={a.y} x2={b.x} y2={b.y}
           stroke="#ff2d2d"
-          strokeWidth={2 + 4 * life}
+          strokeWidth={2 + 3 * life}
           strokeLinecap="round"
           opacity={life}
         />

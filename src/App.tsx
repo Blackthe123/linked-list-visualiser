@@ -30,6 +30,8 @@ export default function App() {
   // Layout and View State
   const [leftPanelWidth, setLeftPanelWidth] = useState(35);
   const [heapAreaHeight, setHeapAreaHeight] = useState(30);
+  const [stackWidth, setStackWidth] = useState(240);
+  const memoryRowRef = useRef<HTMLDivElement>(null);
   const [activeSnippetType, setActiveSnippetType] = useState<OpType>('insert');
 
   // Sync state with current frame
@@ -230,6 +232,23 @@ export default function App() {
     }
   };
 
+  // Splitter between the stack and heap panels
+  const handleStackMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => {
+      const row = memoryRowRef.current?.getBoundingClientRect();
+      if (!row) return;
+      const w = ev.clientX - row.left;
+      setStackWidth(Math.min(Math.max(w, 150), row.width - 150));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
   const handleHeapMouseUp = () => {
     document.removeEventListener('mousemove', handleHeapMouseMove);
     document.removeEventListener('mouseup', handleHeapMouseUp);
@@ -357,8 +376,9 @@ export default function App() {
         </div>
         <div className="heap-resizer" onMouseDown={handleHeapMouseDown} />
         <div style={{ height: `${heapAreaHeight}%`, display: 'flex', flexDirection: 'column' }}>
-          <div className="memory-row">
-            <StackArea stack={currentFrame.stack} highlightedAddresses={highlightedAddresses} />
+          <div className="memory-row" ref={memoryRowRef}>
+            <StackArea stack={currentFrame.stack} width={stackWidth} highlightedAddresses={highlightedAddresses} />
+            <div className="stack-resizer" onMouseDown={handleStackMouseDown} title="Drag to resize stack and heap" />
             <HeapArea
               nodes={currentFrame.nodes}
               variables={currentFrame.variables}

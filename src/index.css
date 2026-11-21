@@ -111,6 +111,9 @@ body {
   right: 12px;
   z-index: 30;
   display: flex;
+  flex-wrap: wrap; /* wraps onto more rows when the canvas is narrow */
+  justify-content: flex-end;
+  max-width: calc(100% - 24px);
   align-items: center;
   gap: 4px;
   padding: 6px;
@@ -195,7 +198,7 @@ body {
   flex: 1;
   padding: 1rem;
   overflow-y: auto;
-  min-width: 0;
+  min-width: 150px; /* the stack shrinks before the heap disappears */
 }
 
 .heap-nodes {
@@ -206,11 +209,21 @@ body {
 }
 
 .stack-area {
-  width: 240px;
-  flex-shrink: 0;
+  min-width: 120px;
   padding: 1rem;
   overflow-y: auto;
-  border-right: 1px solid var(--node-border);
+}
+
+.stack-resizer {
+  width: 5px;
+  flex-shrink: 0;
+  background-color: var(--node-border);
+  cursor: col-resize;
+  transition: background-color 0.2s;
+}
+
+.stack-resizer:hover, .stack-resizer:active {
+  background-color: var(--accent);
 }
 
 .stack-frames {
