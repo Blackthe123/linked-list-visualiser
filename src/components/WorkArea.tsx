@@ -58,7 +58,6 @@ export const WorkArea: React.FC<WorkAreaProps> = ({ nodes, variables, highlighte
         return (
           <React.Fragment key={`${node.address}-null`}>
             <path
-              key={pathD} // forces re-render of marker
               className={`arrow-path ${isHighlighted ? 'highlighted' : ''}`}
               d={pathD}
               markerEnd={`url(#arrowhead${isHighlighted ? '-highlighted' : ''})`}
@@ -87,7 +86,7 @@ export const WorkArea: React.FC<WorkAreaProps> = ({ nodes, variables, highlighte
       
       return (
         <path
-          key={`${node.address}-${node.next}-${pathD}`} // pathD included to force marker update on drag
+          key={`${node.address}-next`}
           className={`arrow-path ${isHighlighted ? 'highlighted' : ''}`}
           d={pathD}
           markerEnd={`url(#arrowhead${isHighlighted ? '-highlighted' : ''})`}
@@ -98,10 +97,12 @@ export const WorkArea: React.FC<WorkAreaProps> = ({ nodes, variables, highlighte
 
   // Draw pointers for variables (head, curr, new_node, etc)
   const renderVariables = () => {
-    return Object.entries(variables).map(([varName, address], index) => {
-      if (!address) return null;
-      const targetNode = nodes.find(n => n.address === address);
-      if (!targetNode) return null;
+    // Only pointer variables that currently point at a node get an arrow (skip ints like value/index)
+    const pointers = Object.entries(variables).filter(
+      ([, address]) => typeof address === 'string' && nodes.some(n => n.address === address)
+    );
+    return pointers.map(([varName, address], index) => {
+      const targetNode = nodes.find(n => n.address === address)!;
 
       const startX = 50 + index * 100;
       const startY = 30;
@@ -137,14 +138,16 @@ export const WorkArea: React.FC<WorkAreaProps> = ({ nodes, variables, highlighte
     >
       <svg className="arrows-layer">
         <defs>
-          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="var(--text-secondary)" />
+          {/* userSpaceOnUse keeps every arrowhead the same size regardless of stroke width,
+              so the thicker highlighted arrows get the same head as the others */}
+          <marker id="arrowhead" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="10" refX="14" refY="5" orient="auto">
+            <polygon points="0 0, 14 5, 0 10" fill="var(--text-secondary)" />
           </marker>
-          <marker id="arrowhead-highlighted" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="var(--node-highlight)" />
+          <marker id="arrowhead-highlighted" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="10" refX="14" refY="5" orient="auto">
+            <polygon points="0 0, 14 5, 0 10" fill="var(--node-highlight)" />
           </marker>
-          <marker id="arrowhead-var" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="var(--accent)" />
+          <marker id="arrowhead-var" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="10" refX="14" refY="5" orient="auto">
+            <polygon points="0 0, 14 5, 0 10" fill="var(--accent)" />
           </marker>
         </defs>
         {renderArrows()}

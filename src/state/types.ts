@@ -12,12 +12,31 @@ export interface Variables {
   [key: string]: any;
 }
 
+export type OpType = 'insert' | 'delete' | 'free' | 'reverse' | 'find';
+export type Mode = 'iterative' | 'recursive';
+
+export interface StackFrame {
+  id: number;
+  fn: string;
+  locals: Record<string, any>;
+  /** Value this call just got back from a recursive call, shown briefly */
+  returned?: { value: string | null };
+}
+
 export interface Frame {
   nodes: LLNode[];
+  /** Locals of the function currently executing (drawn as pointer arrows) */
   variables: Variables;
   lineIndex: number;
   explanation: string;
   codeSnippet: string;
+  op: OpType;
+  /** Call stack, bottom (main) first */
+  stack: StackFrame[];
+  /** The list's head as seen by main */
+  listHead: string | null;
+  /** Addresses to highlight (overrides the default curr/temp/prev logic) */
+  highlight?: string[];
 }
 
 export const CODE_INSERT = `struct node *insert_at_index(struct node *head, int value, int index) {
@@ -99,3 +118,83 @@ export const CODE_FIND = `struct node *find_node(struct node *head, int value) {
     
     return NULL;
 }`;
+
+// ---------------------------------------------------------------------------
+// Recursive versions
+// ---------------------------------------------------------------------------
+
+export const CODE_INSERT_REC = `struct node *insert_at_index(struct node *head, int value, int index) {
+    if (index == 0 || head == NULL) {
+        struct node *new_node = malloc(sizeof(struct node));
+        new_node->value = value;
+        new_node->next = head;
+        return new_node;
+    }
+
+    head->next = insert_at_index(head->next, value, index - 1);
+    return head;
+}`;
+
+export const CODE_DELETE_REC = `struct node *delete_node(struct node *head, int value) {
+    if (head == NULL) return NULL;
+
+    if (head->value == value) {
+        struct node *rest = head->next;
+        free(head);
+        return rest;
+    }
+
+    head->next = delete_node(head->next, value);
+    return head;
+}`;
+
+export const CODE_FREE_REC = `void free_list(struct node *head) {
+    if (head == NULL) return;
+
+    free_list(head->next);
+    free(head);
+}`;
+
+export const CODE_REVERSE_REC = `struct node *reverse_list(struct node *head) {
+    if (head == NULL || head->next == NULL) {
+        return head;
+    }
+
+    struct node *new_head = reverse_list(head->next);
+    head->next->next = head;
+    head->next = NULL;
+    return new_head;
+}`;
+
+export const CODE_FIND_REC = `struct node *find_node(struct node *head, int value) {
+    if (head == NULL) return NULL;
+
+    if (head->value == value) return head;
+
+    return find_node(head->next, value);
+}`;
+
+export const CODE: Record<Mode, Record<OpType, string>> = {
+  iterative: {
+    insert: CODE_INSERT,
+    delete: CODE_DELETE,
+    free: CODE_FREE,
+    reverse: CODE_REVERSE,
+    find: CODE_FIND,
+  },
+  recursive: {
+    insert: CODE_INSERT_REC,
+    delete: CODE_DELETE_REC,
+    free: CODE_FREE_REC,
+    reverse: CODE_REVERSE_REC,
+    find: CODE_FIND_REC,
+  },
+};
+
+export const FN_NAMES: Record<OpType, string> = {
+  insert: 'insert_at_index',
+  delete: 'delete_node',
+  free: 'free_list',
+  reverse: 'reverse_list',
+  find: 'find_node',
+};

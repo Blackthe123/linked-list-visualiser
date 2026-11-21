@@ -18,6 +18,7 @@ Each operation generates a sequence of frames that walk through the actual C cod
 - **Step Prev / Step Next** — move one line at a time
 - **Auto Play** — automatically advances every second
 - **Skip to End** — jump straight to the final state
+- **Cancel** — abandon the operation part way through and restore the list to how it was before it started
 - The **currently executing line is highlighted** in the code panel, and all active pointer variables (`curr`, `prev`, `temp`, `new_node`, etc.) are highlighted in **both** the work area and the heap.
 
 ### Supported Operations
@@ -28,6 +29,14 @@ Each operation generates a sequence of frames that walk through the actual C cod
 | `reverse_list(head)` | Reverse the list in place (3-pointer technique) |
 | `find_node(head, value)` | Traverse the list searching for a value |
 | `free_list(head)` | Free every node one by one and reset `head` to `NULL` |
+
+Insert defaults its index to the current length of the list, so the quickest insert adds to the end.
+
+### Iterative and Recursive Modes
+A toggle at the top of the controls switches every operation between its iterative and recursive version. The code panel shows the matching C code, and each recursive call gets its own frame in the stack view.
+
+### Stack Memory View
+Next to the heap, the stack panel shows `main` and every active function call with its local variables. During recursion you can watch frames get pushed on the way down and popped on the way back up, including the value each call returns to its caller.
 
 ### Heap Memory View
 A resizable panel at the bottom right shows each node as it exists in simulated heap memory — with its **memory address** (e.g. `0x104`), **`value`**, and **`next` pointer**. Nodes currently being operated on are highlighted to match the work area.
@@ -82,6 +91,7 @@ src/
   components/
     WorkArea.tsx      — draggable node canvas with live SVG pointer arrows
     HeapArea.tsx      — static heap memory block view with addresses
+    StackArea.tsx     — call stack view (one frame per active call)
     CodeViewer.tsx    — syntax-highlighted C code with active line tracking
   App.tsx             — layout, resizers, state machine, operation dispatch
   index.css           — design system (dark mode, glassmorphism nodes,
@@ -91,8 +101,8 @@ src/
 ### Adding a New Operation
 
 1. Add a `CODE_*` constant string in `src/state/types.ts`
-2. Write a `generate*Frames(nodes, head, ...)` function in `src/state/engine.ts` — push a `Frame` for each meaningful step in the C code
-3. Wire up a button + optional form in `App.tsx`
+2. Write iterative and recursive frame generators in `src/state/engine.ts` and add them to `generateFrames`
+3. Wire up a button + optional form in `App.tsx` (call `startOp`)
 4. Add a tab in `CodeViewer.tsx`
 
 ---

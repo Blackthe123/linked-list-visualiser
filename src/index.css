@@ -78,15 +78,115 @@ body {
   background-color: var(--accent);
 }
 
-.heap-area {
-  border-top: 1px solid var(--node-border);
+.memory-row {
+  flex: 1;
+  display: flex;
+  min-height: 0;
   background-color: var(--heap-bg);
+  border-top: 1px solid var(--node-border);
+}
+
+.area-title {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+
+.heap-area {
+  flex: 1;
   padding: 1rem;
   overflow-y: auto;
+  min-width: 0;
+}
+
+.heap-nodes {
   display: flex;
   flex-wrap: wrap;
   gap: 1rem;
   align-content: flex-start;
+}
+
+.stack-area {
+  width: 240px;
+  flex-shrink: 0;
+  padding: 1rem;
+  overflow-y: auto;
+  border-right: 1px solid var(--node-border);
+}
+
+.stack-frames {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stack-frame {
+  background: var(--bg-secondary);
+  border: 1px solid var(--node-border);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.stack-frame.active {
+  opacity: 1;
+  border-color: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.stack-header {
+  display: flex;
+  justify-content: space-between;
+  background: var(--node-bg);
+  padding: 0.2rem 0.5rem;
+  border-bottom: 1px solid var(--node-border);
+  color: var(--text-primary);
+}
+
+.stack-depth {
+  color: var(--text-secondary);
+}
+
+.stack-hl {
+  color: var(--node-highlight);
+}
+
+.stack-returned {
+  color: #22c55e;
+}
+
+.mode-toggle {
+  display: flex;
+  border: 1px solid var(--node-border);
+  border-radius: 6px;
+  overflow: hidden;
+  width: fit-content;
+}
+
+.mode-toggle button {
+  border: none;
+  border-radius: 0;
+}
+
+.mode-toggle button.active {
+  background: var(--accent);
+}
+
+.cancel-btn {
+  background: transparent;
+  border-color: #ef4444;
+  color: #fca5a5;
+}
+
+.cancel-btn:hover {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: white;
 }
 
 .code-viewer-header {
@@ -271,7 +371,7 @@ input[type="number"] {
   fill: none;
   stroke: var(--text-secondary);
   stroke-width: 2;
-  transition: d 0.1s linear, stroke 0.2s;
+  transition: stroke 0.2s;
 }
 
 .arrow-path.highlighted {

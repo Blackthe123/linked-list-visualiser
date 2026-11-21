@@ -1,5 +1,7 @@
-import type { LLNode, Frame, Variables } from './types';
-import { CODE_INSERT, CODE_DELETE, CODE_FREE, CODE_REVERSE, CODE_FIND } from './types';
+import type { LLNode, Frame, Variables, OpType, Mode, StackFrame } from './types';
+import { CODE_INSERT, CODE_DELETE, CODE_FREE, CODE_REVERSE, CODE_FIND, CODE, FN_NAMES } from './types';
+
+type RawFrame = Omit<Frame, 'op' | 'stack' | 'listHead'>;
 
 function cloneNodes(nodes: LLNode[]): LLNode[] {
   return nodes.map(n => ({ ...n }));
@@ -15,13 +17,28 @@ function getNewAddress() {
   return `0x${addrCounter.toString(16).toUpperCase()}`;
 }
 
-export function generateInsertFrames(
+/** malloc: adds an uninitialised node below the existing ones, returns its address */
+function allocNode(nodes: LLNode[]): string {
+  const address = getNewAddress();
+  const spawnY = nodes.length > 0 ? Math.max(...nodes.map(n => n.y)) + 150 : 100;
+  nodes.push({
+    id: `node-${address}-${Date.now()}`,
+    address,
+    value: '?',
+    next: '?',
+    x: 100,
+    y: spawnY,
+  });
+  return address;
+}
+
+function iterInsert(
   initialNodes: LLNode[],
   initialHead: string | null,
   value: number,
   index: number
-): Frame[] {
-  const frames: Frame[] = [];
+): RawFrame[] {
+  const frames: RawFrame[] = [];
   let currentNodes = cloneNodes(initialNodes);
   let vars: Variables = { head: initialHead };
 
@@ -38,21 +55,7 @@ export function generateInsertFrames(
   pushFrame(0, `Calling insert_at_index(head, ${value}, ${index})`);
 
   // struct node *new_node = malloc(...)
-  const newAddr = getNewAddress();
-  let spawnY = 100;
-  if (currentNodes.length > 0) {
-    const max_y = Math.max(...currentNodes.map(n => n.y));
-    spawnY = max_y + 150;
-  }
-  const newNode: LLNode = {
-    id: `node-${Date.now()}`,
-    address: newAddr,
-    value: '?',
-    next: '?',
-    x: 100, // Default spawn position
-    y: spawnY,
-  };
-  currentNodes.push(newNode);
+  const newAddr = allocNode(currentNodes);
   vars['new_node'] = newAddr;
   pushFrame(1, `Allocated new node at ${newAddr} (memory is uninitialized)`);
 
@@ -122,12 +125,12 @@ export function generateInsertFrames(
   return frames;
 }
 
-export function generateDeleteFrames(
+function iterDelete(
   initialNodes: LLNode[],
   initialHead: string | null,
   value: number
-): Frame[] {
-  const frames: Frame[] = [];
+): RawFrame[] {
+  const frames: RawFrame[] = [];
   let currentNodes = cloneNodes(initialNodes);
   let vars: Variables = { head: initialHead };
 
@@ -225,11 +228,11 @@ export function generateDeleteFrames(
   return frames;
 }
 
-export function generateFreeFrames(
+function iterFree(
   initialNodes: LLNode[],
   initialHead: string | null
-): Frame[] {
-  const frames: Frame[] = [];
+): RawFrame[] {
+  const frames: RawFrame[] = [];
   let currentNodes = cloneNodes(initialNodes);
   let vars: Variables = { head: initialHead };
 
@@ -278,11 +281,11 @@ export function generateFreeFrames(
   return frames;
 }
 
-export function generateReverseFrames(
+function iterReverse(
   initialNodes: LLNode[],
   initialHead: string | null
-): Frame[] {
-  const frames: Frame[] = [];
+): RawFrame[] {
+  const frames: RawFrame[] = [];
   let currentNodes = cloneNodes(initialNodes);
   let vars: Variables = { head: initialHead };
 
@@ -340,12 +343,12 @@ export function generateReverseFrames(
   return frames;
 }
 
-export function generateFindFrames(
+function iterFind(
   initialNodes: LLNode[],
   initialHead: string | null,
   value: number
-): Frame[] {
-  const frames: Frame[] = [];
+): RawFrame[] {
+  const frames: RawFrame[] = [];
   let currentNodes = cloneNodes(initialNodes);
   let vars: Variables = { head: initialHead };
 
@@ -385,4 +388,290 @@ export function generateFindFrames(
   pushFrame(10, `Node not found, returning NULL`);
 
   return frames;
+}
+
+// ---------------------------------------------------------------------------
+// Iterative: wrap raw frames with a simple two-level call stack
+// ---------------------------------------------------------------------------
+
+function withStack(raw: RawFrame[], op: OpType, initialHead: string | null): Frame[] {
+  return raw.map((f, i) => {
+    const isLast = i === raw.length - 1;
+    const mainHead = isLast ? f.variables.head : initialHead;
+    const stack: StackFrame[] = [{ id: 0, fn: 'main', locals: { head: mainHead } }];
+    if (!isLast) stack.push({ id: 1, fn: FN_NAMES[op], locals: { ...f.variables } });
+    return { ...f, op, stack, listHead: mainHead };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Recursive versions
+// ---------------------------------------------------------------------------
+
+const fmt = (addr: string | null | undefined) => (addr == null ? 'NULL' : addr);
+
+function makeRecursiveRunner(op: OpType, initialNodes: LLNode[], initialHead: string | null) {
+  const frames: Frame[] = [];
+  let nodes = cloneNodes(initialNodes);
+  const stack: StackFrame[] = [{ id: 0, fn: 'main', locals: { head: initialHead } }];
+  let nextId = 1;
+
+  const top = () => stack[stack.length - 1];
+
+  const snap = (line: number, explanation: string) => {
+    const t = top();
+    frames.push({
+      nodes: cloneNodes(nodes),
+      variables: { ...t.locals } as Variables,
+      lineIndex: line,
+      explanation,
+      codeSnippet: CODE.recursive[op],
+      op,
+      stack: stack.map(f => ({
+        ...f,
+        locals: { ...f.locals },
+        returned: f.returned ? { ...f.returned } : undefined,
+      })),
+      listHead: stack[0].locals.head,
+      highlight: t.fn !== 'main' && t.locals.head ? [t.locals.head] : [],
+    });
+  };
+
+  return {
+    frames,
+    snap,
+    top,
+    node: (addr: string | null) => (addr ? nodes.find(n => n.address === addr) : undefined),
+    call: (locals: Record<string, any>) => {
+      stack.push({ id: nextId++, fn: FN_NAMES[op], locals });
+    },
+    ret: () => {
+      stack.pop();
+    },
+    /** Show the caller receiving a value from the call it just made */
+    receive: (value: string | null) => {
+      top().returned = { value };
+    },
+    clearReceived: () => {
+      delete top().returned;
+    },
+    malloc: () => allocNode(nodes),
+    free: (addr: string) => {
+      nodes = nodes.filter(n => n.address !== addr);
+    },
+    setMainHead: (h: string | null) => {
+      stack[0].locals.head = h;
+    },
+  };
+}
+
+function recInsert(initialNodes: LLNode[], initialHead: string | null, value: number, index: number): Frame[] {
+  const r = makeRecursiveRunner('insert', initialNodes, initialHead);
+
+  const go = (head: string | null, index: number): string | null => {
+    r.call({ head, value, index });
+    r.snap(0, `Called insert_at_index(${fmt(head)}, ${value}, ${index})`);
+    r.snap(1, `Check index == 0 || head == NULL (index = ${index}, head = ${fmt(head)})`);
+    if (index === 0 || head === null) {
+      const addr = r.malloc();
+      r.top().locals.new_node = addr;
+      r.snap(2, `Base case. Allocated new node at ${addr} (memory is uninitialised)`);
+      r.node(addr)!.value = value;
+      r.snap(3, `Set new_node->value to ${value}`);
+      r.node(addr)!.next = head;
+      r.snap(4, `Set new_node->next to head (${fmt(head)})`);
+      r.snap(5, `Return new_node (${addr}) to the caller`);
+      r.ret();
+      return addr;
+    }
+    r.snap(8, `Recursive case. Call insert_at_index on head->next with index ${index - 1}`);
+    const result = go(r.node(head)?.next ?? null, index - 1);
+    r.receive(result);
+    r.snap(8, `Call returned ${fmt(result)}`);
+    const n = r.node(head);
+    if (n) n.next = result;
+    r.clearReceived();
+    r.snap(8, `Set head->next (${head}) to ${fmt(result)}`);
+    r.snap(9, `Return head (${head}) to the caller`);
+    r.ret();
+    return head;
+  };
+
+  const newHead = go(initialHead, index);
+  r.setMainHead(newHead);
+  r.snap(-1, `Back in main: head = ${fmt(newHead)}`);
+  return r.frames;
+}
+
+function recDelete(initialNodes: LLNode[], initialHead: string | null, value: number): Frame[] {
+  const r = makeRecursiveRunner('delete', initialNodes, initialHead);
+
+  const go = (head: string | null): string | null => {
+    r.call({ head, value });
+    r.snap(0, `Called delete_node(${fmt(head)}, ${value})`);
+    r.snap(1, `Check if head is NULL`);
+    if (head === null) {
+      r.snap(1, `head is NULL, return NULL`);
+      r.ret();
+      return null;
+    }
+    const n = r.node(head);
+    r.snap(3, `Check if head->value (${n?.value}) == ${value}`);
+    if (n && n.value === value) {
+      r.top().locals.rest = n.next;
+      r.snap(4, `Match. Save rest = head->next (${fmt(n.next)})`);
+      r.free(head);
+      r.snap(5, `free(head) at ${head}`);
+      r.snap(6, `Return rest (${fmt(n.next)}) to the caller`);
+      r.ret();
+      return n.next;
+    }
+    r.snap(9, `No match. Call delete_node on head->next`);
+    const result = go(n?.next ?? null);
+    r.receive(result);
+    r.snap(9, `Call returned ${fmt(result)}`);
+    const n2 = r.node(head);
+    if (n2) n2.next = result;
+    r.clearReceived();
+    r.snap(9, `Set head->next (${head}) to ${fmt(result)}`);
+    r.snap(10, `Return head (${head}) to the caller`);
+    r.ret();
+    return head;
+  };
+
+  const newHead = go(initialHead);
+  r.setMainHead(newHead);
+  r.snap(-1, `Back in main: head = ${fmt(newHead)}`);
+  return r.frames;
+}
+
+function recFree(initialNodes: LLNode[], initialHead: string | null): Frame[] {
+  const r = makeRecursiveRunner('free', initialNodes, initialHead);
+
+  const go = (head: string | null) => {
+    r.call({ head });
+    r.snap(0, `Called free_list(${fmt(head)})`);
+    r.snap(1, `Check if head is NULL`);
+    if (head === null) {
+      r.snap(1, `head is NULL, return`);
+      r.ret();
+      return;
+    }
+    const next = r.node(head)?.next;
+    r.snap(3, `Free the rest of the list first: free_list(head->next)`);
+    go(next === '?' || next === undefined ? null : next);
+    r.snap(3, `free_list(head->next) returned, everything after ${head} is freed`);
+    r.free(head);
+    r.snap(4, `free(head) at ${head}`);
+    r.ret();
+  };
+
+  go(initialHead);
+  r.setMainHead(null);
+  r.snap(-1, `Back in main: list freed, head set to NULL`);
+  return r.frames;
+}
+
+function recReverse(initialNodes: LLNode[], initialHead: string | null): Frame[] {
+  const r = makeRecursiveRunner('reverse', initialNodes, initialHead);
+
+  const go = (head: string | null): string | null => {
+    r.call({ head });
+    r.snap(0, `Called reverse_list(${fmt(head)})`);
+    const n = r.node(head);
+    r.snap(1, `Check head == NULL || head->next == NULL`);
+    if (head === null || !n || n.next === null) {
+      r.snap(2, `Base case. Return head (${fmt(head)})`);
+      r.ret();
+      return head;
+    }
+    r.snap(5, `Reverse the rest of the list: reverse_list(head->next)`);
+    const newHead = go(n.next);
+    r.receive(newHead);
+    r.snap(5, `Call returned ${fmt(newHead)}`);
+    r.clearReceived();
+    r.top().locals.new_head = newHead;
+    r.snap(5, `new_head = ${fmt(newHead)}`);
+    const nextNode = r.node(n.next);
+    if (nextNode) nextNode.next = head;
+    r.snap(6, `head->next->next = head (${n.next} now points back to ${head})`);
+    n.next = null;
+    r.snap(7, `head->next = NULL`);
+    r.snap(8, `Return new_head (${fmt(newHead)}) to the caller`);
+    r.ret();
+    return newHead;
+  };
+
+  const newHead = go(initialHead);
+  r.setMainHead(newHead);
+  r.snap(-1, `Back in main: head = ${fmt(newHead)}`);
+  return r.frames;
+}
+
+function recFind(initialNodes: LLNode[], initialHead: string | null, value: number): Frame[] {
+  const r = makeRecursiveRunner('find', initialNodes, initialHead);
+
+  const go = (head: string | null): string | null => {
+    r.call({ head, value });
+    r.snap(0, `Called find_node(${fmt(head)}, ${value})`);
+    r.snap(1, `Check if head is NULL`);
+    if (head === null) {
+      r.snap(1, `head is NULL, return NULL`);
+      r.ret();
+      return null;
+    }
+    const n = r.node(head);
+    r.snap(3, `Check if head->value (${n?.value}) == ${value}`);
+    if (n && n.value === value) {
+      r.snap(3, `Found it. Return head (${head})`);
+      r.ret();
+      return head;
+    }
+    r.snap(5, `Not here. Search the rest: find_node(head->next, ${value})`);
+    const result = go(n?.next ?? null);
+    r.receive(result);
+    r.snap(5, `Call returned ${fmt(result)}, pass it back up`);
+    r.ret();
+    return result;
+  };
+
+  const found = go(initialHead);
+  r.snap(-1, found ? `Back in main: found ${value} at ${found}` : `Back in main: ${value} not found (NULL)`);
+  return r.frames;
+}
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+export interface OpArgs {
+  value?: number;
+  index?: number;
+}
+
+export function generateFrames(
+  mode: Mode,
+  op: OpType,
+  nodes: LLNode[],
+  head: string | null,
+  args: OpArgs = {}
+): Frame[] {
+  const value = args.value ?? 0;
+  const index = args.index ?? 0;
+  if (mode === 'recursive') {
+    switch (op) {
+      case 'insert': return recInsert(nodes, head, value, index);
+      case 'delete': return recDelete(nodes, head, value);
+      case 'free': return recFree(nodes, head);
+      case 'reverse': return recReverse(nodes, head);
+      case 'find': return recFind(nodes, head, value);
+    }
+  }
+  switch (op) {
+    case 'insert': return withStack(iterInsert(nodes, head, value, index), op, head);
+    case 'delete': return withStack(iterDelete(nodes, head, value), op, head);
+    case 'free': return withStack(iterFree(nodes, head), op, head);
+    case 'reverse': return withStack(iterReverse(nodes, head), op, head);
+    case 'find': return withStack(iterFind(nodes, head, value), op, head);
+  }
 }

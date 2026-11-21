@@ -10,6 +10,8 @@ interface HeapAreaProps {
 export const HeapArea: React.FC<HeapAreaProps> = ({ nodes, highlightedAddresses }) => {
   return (
     <div className="heap-area">
+      <div className="area-title">Heap</div>
+      <div className="heap-nodes">
       {nodes.map(node => (
         <div 
           key={node.address} 
@@ -29,6 +31,7 @@ export const HeapArea: React.FC<HeapAreaProps> = ({ nodes, highlightedAddresses 
       {nodes.length === 0 && (
         <div style={{ color: 'var(--text-secondary)' }}>Heap is empty.</div>
       )}
+      </div>
     </div>
   );
 };

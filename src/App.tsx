@@ -2,13 +2,18 @@ import React, { useState, useEffect, useRef } from 'react';
 import { WorkArea } from './components/WorkArea';
 import { HeapArea } from './components/HeapArea';
 import { CodeViewer } from './components/CodeViewer';
-import type { LLNode, Variables, Frame } from './state/types';
-import { CODE_INSERT, CODE_DELETE, CODE_FREE, CODE_REVERSE, CODE_FIND } from './state/types';
-import { generateInsertFrames, generateDeleteFrames, generateFreeFrames, generateReverseFrames, generateFindFrames } from './state/engine';
+import { StackArea } from './components/StackArea';
+import type { LLNode, Variables, Frame, OpType, Mode } from './state/types';
+import { CODE } from './state/types';
+import { generateFrames } from './state/engine';
+import type { OpArgs } from './state/engine';
 
 export default function App() {
   const [nodes, setNodes] = useState<LLNode[]>([]);
-  const [variables] = useState<Variables>({ head: null });
+  const [variables, setVariables] = useState<Variables>({ head: null });
+  const [mode, setMode] = useState<Mode>('iterative');
+  // List state from before the current operation started, so it can be cancelled
+  const [baseState, setBaseState] = useState<{ nodes: LLNode[]; head: string | null } | null>(null);
   
   const [frames, setFrames] = useState<Frame[]>([]);
   const [frameIndex, setFrameIndex] = useState(0);
@@ -25,15 +30,42 @@ export default function App() {
   // Layout and View State
   const [leftPanelWidth, setLeftPanelWidth] = useState(35);
   const [heapAreaHeight, setHeapAreaHeight] = useState(30);
-  const [activeSnippetType, setActiveSnippetType] = useState<'insert' | 'delete' | 'free' | 'reverse' | 'find'>('insert');
+  const [activeSnippetType, setActiveSnippetType] = useState<OpType>('insert');
 
   // Sync state with current frame
-  const currentFrame = frames[frameIndex] || {
+  const currentFrame: Frame = frames[frameIndex] || {
     nodes,
     variables,
     lineIndex: -1,
     explanation: 'Ready.',
-    codeSnippet: activeSnippetType === 'insert' ? CODE_INSERT : activeSnippetType === 'delete' ? CODE_DELETE : activeSnippetType === 'reverse' ? CODE_REVERSE : activeSnippetType === 'find' ? CODE_FIND : CODE_FREE,
+    codeSnippet: CODE[mode][activeSnippetType],
+    op: activeSnippetType,
+    stack: [{ id: 0, fn: 'main', locals: { head: variables.head } }],
+    listHead: variables.head,
+  };
+
+  // The list as it stands right now (end of the last operation, or the idle state)
+  const getListState = () => {
+    if (frames.length > 0) {
+      const last = frames[frames.length - 1];
+      return { nodes: last.nodes, head: last.listHead };
+    }
+    return { nodes, head: variables.head };
+  };
+
+  const listLength = () => {
+    const { nodes: ns, head } = getListState();
+    let count = 0;
+    let curr = head;
+    const seen = new Set<string>();
+    while (curr && !seen.has(curr)) {
+      seen.add(curr);
+      const n = ns.find(x => x.address === curr);
+      if (!n) break;
+      count++;
+      curr = n.next === '?' ? null : n.next;
+    }
+    return count;
   };
 
   const handleNodeMove = (id: string, x: number, y: number) => {
@@ -46,75 +78,54 @@ export default function App() {
     }
   };
 
-  const startInsert = () => {
-    const newFrames = generateInsertFrames(
-      frames.length > 0 ? frames[frames.length - 1].nodes : nodes,
-      frames.length > 0 ? frames[frames.length - 1].variables.head : variables.head,
-      insertValue,
-      insertIndex
-    );
+  const startOp = (op: OpType, args: OpArgs = {}) => {
+    const { nodes: baseNodes, head } = getListState();
+    const newFrames = generateFrames(mode, op, baseNodes, head, args);
+    setBaseState({ nodes: baseNodes, head });
     setFrames(newFrames);
     setFrameIndex(0);
     setIsPlaying(false);
     setActiveForm(null);
-    setActiveSnippetType('insert');
+    setActiveSnippetType(op);
   };
 
-  const startDelete = () => {
-    const newFrames = generateDeleteFrames(
-      frames.length > 0 ? frames[frames.length - 1].nodes : nodes,
-      frames.length > 0 ? frames[frames.length - 1].variables.head : variables.head,
-      deleteValue
-    );
-    setFrames(newFrames);
-    setFrameIndex(0);
-    setIsPlaying(false);
-    setActiveForm(null);
-    setActiveSnippetType('delete');
+  const startInsert = () => startOp('insert', { value: insertValue, index: insertIndex });
+  const startDelete = () => startOp('delete', { value: deleteValue });
+  const startFree = () => startOp('free');
+  const startReverse = () => startOp('reverse');
+  const startFind = () => startOp('find', { value: findValue });
+
+  const openInsertForm = () => {
+    if (activeForm === 'insert') {
+      setActiveForm(null);
+      return;
+    }
+    // Default to inserting at the end of the list
+    setInsertIndex(listLength());
+    setActiveForm('insert');
   };
 
-  const startFree = () => {
-    const newFrames = generateFreeFrames(
-      frames.length > 0 ? frames[frames.length - 1].nodes : nodes,
-      frames.length > 0 ? frames[frames.length - 1].variables.head : variables.head
-    );
-    setFrames(newFrames);
+  // Abandon the running operation and put the list back how it was before it started.
+  // Keeps any node positions you dragged while stepping through.
+  const cancelOp = () => {
+    if (!baseState) return;
+    const moved = new Map(currentFrame.nodes.map(n => [n.id, n]));
+    const restored = baseState.nodes.map(n => {
+      const m = moved.get(n.id);
+      return m ? { ...n, x: m.x, y: m.y } : { ...n };
+    });
+    setNodes(restored);
+    setVariables({ head: baseState.head });
+    setFrames([]);
     setFrameIndex(0);
     setIsPlaying(false);
-    setActiveForm(null);
-    setActiveSnippetType('free');
-  };
-
-  const startReverse = () => {
-    const newFrames = generateReverseFrames(
-      frames.length > 0 ? frames[frames.length - 1].nodes : nodes,
-      frames.length > 0 ? frames[frames.length - 1].variables.head : variables.head
-    );
-    setFrames(newFrames);
-    setFrameIndex(0);
-    setIsPlaying(false);
-    setActiveForm(null);
-    setActiveSnippetType('reverse');
-  };
-
-  const startFind = () => {
-    const newFrames = generateFindFrames(
-      frames.length > 0 ? frames[frames.length - 1].nodes : nodes,
-      frames.length > 0 ? frames[frames.length - 1].variables.head : variables.head,
-      findValue
-    );
-    setFrames(newFrames);
-    setFrameIndex(0);
-    setIsPlaying(false);
-    setActiveForm(null);
-    setActiveSnippetType('find');
+    setBaseState(null);
   };
 
   const reorderNodes = () => {
-    const activeNodes = frames.length > 0 ? frames[frames.length - 1].nodes : nodes;
-    const headAddress = frames.length > 0 ? frames[frames.length - 1].variables.head : variables.head;
-    
-    const newNodes = [...activeNodes];
+    const { nodes: activeNodes, head: headAddress } = getListState();
+
+    const newNodes = activeNodes.map(n => ({ ...n }));
     let curr = headAddress;
     let index = 0;
     while (curr) {
@@ -178,6 +189,7 @@ export default function App() {
   }, [isPlaying, frames.length]);
 
   const highlightedAddresses = React.useMemo(() => {
+    if (currentFrame.highlight) return currentFrame.highlight;
     const addresses = new Set<string>();
     if (currentFrame.variables['curr']) addresses.add(currentFrame.variables['curr']);
     if (currentFrame.variables['temp']) addresses.add(currentFrame.variables['temp']);
@@ -224,7 +236,7 @@ export default function App() {
   };
   const isOperating = frames.length > 0 && frameIndex < frames.length - 1;
 
-  const handleSnippetChange = (type: 'insert' | 'delete' | 'free' | 'reverse' | 'find') => {
+  const handleSnippetChange = (type: OpType) => {
     // Only allow switching when not mid-execution
     if (!isOperating) {
       setActiveSnippetType(type);
@@ -233,30 +245,21 @@ export default function App() {
 
   // While an operation is running step-by-step, lock the viewer to that function's code.
   // Any other time (idle, before first confirm, or after last frame) allow free browsing.
-  const snippetMap = {
-    insert: CODE_INSERT,
-    delete: CODE_DELETE,
-    free: CODE_FREE,
-    reverse: CODE_REVERSE,
-    find: CODE_FIND,
-  };
-  const displayedSnippet = isOperating ? currentFrame.codeSnippet : snippetMap[activeSnippetType];
+  const displayedSnippet = isOperating ? currentFrame.codeSnippet : CODE[mode][activeSnippetType];
   const displayedLineIndex = isOperating ? currentFrame.lineIndex : -1;
-  const displayedActiveSnippetType = isOperating
-    ? (currentFrame.codeSnippet === CODE_INSERT ? 'insert'
-      : currentFrame.codeSnippet === CODE_DELETE ? 'delete'
-      : currentFrame.codeSnippet === CODE_REVERSE ? 'reverse'
-      : currentFrame.codeSnippet === CODE_FIND ? 'find'
-      : 'free')
-    : activeSnippetType;
+  const displayedActiveSnippetType = isOperating ? currentFrame.op : activeSnippetType;
 
   return (
     <div className="app-container">
       <div className="left-panel" style={{ width: `${leftPanelWidth}%` }}>
         <div className="controls">
           <h2>Controls</h2>
+          <div className="mode-toggle" title="Switch between iterative and recursive versions of every function">
+            <button className={mode === 'iterative' ? 'active' : ''} disabled={isOperating} onClick={() => setMode('iterative')}>Iterative</button>
+            <button className={mode === 'recursive' ? 'active' : ''} disabled={isOperating} onClick={() => setMode('recursive')}>Recursive</button>
+          </div>
           <div className="controls-row">
-            <button disabled={isOperating} onClick={() => setActiveForm(activeForm === 'insert' ? null : 'insert')}>Insert Node</button>
+            <button disabled={isOperating} onClick={openInsertForm}>Insert Node</button>
             <button disabled={isOperating} onClick={() => setActiveForm(activeForm === 'delete' ? null : 'delete')}>Delete Node</button>
             <button disabled={isOperating} onClick={() => setActiveForm(activeForm === 'find' ? null : 'find')}>Find Node</button>
           </div>
@@ -274,7 +277,7 @@ export default function App() {
                 <input type="number" value={insertValue} onChange={e => setInsertValue(Number(e.target.value))} />
               </div>
               <div className="control-group">
-                <label>Index</label>
+                <label>Index (list has {listLength()} node{listLength() === 1 ? '' : 's'})</label>
                 <input type="number" value={insertIndex} onChange={e => setInsertIndex(Number(e.target.value))} />
               </div>
               <button onClick={startInsert} style={{ background: 'var(--accent)', marginTop: '0.5rem' }}>Confirm Insert</button>
@@ -312,6 +315,11 @@ export default function App() {
             <button onClick={() => setIsPlaying(!isPlaying)} disabled={frameIndex >= frames.length - 1 || frames.length === 0}>
               {isPlaying ? 'Pause' : 'Auto Play'}
             </button>
+            {isOperating && (
+              <button className="cancel-btn" onClick={cancelOp} title="Stop this operation and restore the list to how it was before it started">
+                Cancel
+              </button>
+            )}
           </div>
           <div style={{ color: 'var(--accent)', marginTop: '0.5rem', minHeight: '3rem' }}>
             {currentFrame.explanation}
@@ -349,11 +357,14 @@ export default function App() {
         </div>
         <div className="heap-resizer" onMouseDown={handleHeapMouseDown} />
         <div style={{ height: `${heapAreaHeight}%`, display: 'flex', flexDirection: 'column' }}>
-          <HeapArea 
-            nodes={currentFrame.nodes}
-            variables={currentFrame.variables}
-            highlightedAddresses={highlightedAddresses}
-          />
+          <div className="memory-row">
+            <StackArea stack={currentFrame.stack} highlightedAddresses={highlightedAddresses} />
+            <HeapArea
+              nodes={currentFrame.nodes}
+              variables={currentFrame.variables}
+              highlightedAddresses={highlightedAddresses}
+            />
+          </div>
         </div>
       </div>
     </div>
