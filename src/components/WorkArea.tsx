@@ -9,6 +9,7 @@ interface WorkAreaProps {
 }
 
 type Tool = 'select' | 'pen' | 'eraser' | 'laser';
+type EraseMode = 'stroke' | 'partial';
 type Point = { x: number; y: number };
 type Stroke = { id: number; color: string; points: Point[] };
 type LaserPoint = Point & { t: number };
@@ -37,6 +38,29 @@ function distToSegment(p: Point, a: Point, b: Point) {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
+// Add points along each segment so no gap is wider than `step` (lets the partial eraser cut cleanly)
+function densify(points: Point[], step: number): Point[] {
+  if (points.length < 2) return points;
+  const out: Point[] = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const n = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / step);
+    for (let k = 1; k <= n; k++) {
+      out.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n });
+    }
+  }
+  return out;
+}
+
+function strokeTouches(s: Stroke, p: Point, r: number) {
+  if (s.points.length === 1) return Math.hypot(s.points[0].x - p.x, s.points[0].y - p.y) <= r;
+  for (let i = 0; i < s.points.length - 1; i++) {
+    if (distToSegment(p, s.points[i], s.points[i + 1]) <= r) return true;
+  }
+  return false;
+}
+
 function strokePath(points: Point[]) {
   if (points.length === 0) return '';
   if (points.length === 1) {
@@ -63,7 +87,7 @@ export const WorkArea: React.FC<WorkAreaProps> = ({ nodes, variables, highlighte
   const viewRef = useRef(view);
   viewRef.current = view;
 
-  const [tool, setTool] = useState<Tool>('select');
+  const [tool, setToolState] = useState<Tool>('select');
   const [penColor, setPenColor] = useState(PEN_COLORS[0].value);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [currentStroke, setCurrentStroke] = useState<Stroke | null>(null);
@@ -72,6 +96,12 @@ export const WorkArea: React.FC<WorkAreaProps> = ({ nodes, variables, highlighte
   const [laserTrail, setLaserTrail] = useState<LaserPoint[]>([]);
   const [hoverPos, setHoverPos] = useState<Point | null>(null); // screen coords
   const [spaceHeld, setSpaceHeld] = useState(false);
+  const [eraseMode, setEraseMode] = useState<EraseMode>('stroke');
+  const [eraseMenuOpen, setEraseMenuOpen] = useState(false);
+  const setTool = (t: Tool) => {
+    setToolState(t);
+    if (t !== 'eraser') setEraseMenuOpen(false);
+  };
 
   // Interaction state
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
@@ -176,7 +206,7 @@ export const WorkArea: React.FC<WorkAreaProps> = ({ nodes, variables, highlighte
       else if (k === 'p') setTool('pen');
       else if (k === 'e') setTool('eraser');
       else if (k === 'l') setTool('laser');
-      else if (k === 'f') fitToContent();
+      else if (k === 'r') fitToContent();
       else if (k === '=' || k === '+') zoomCenter(1.2);
       else if (k === '-') zoomCenter(1 / 1.2);
       else {
@@ -217,15 +247,29 @@ export const WorkArea: React.FC<WorkAreaProps> = ({ nodes, variables, highlighte
 
   const eraseAt = (world: Point) => {
     const r = ERASER_RADIUS / viewRef.current.scale;
-    setStrokes(prev =>
-      prev.filter(s => {
-        if (s.points.length === 1) return Math.hypot(s.points[0].x - world.x, s.points[0].y - world.y) > r;
-        for (let i = 0; i < s.points.length - 1; i++) {
-          if (distToSegment(world, s.points[i], s.points[i + 1]) <= r) return false;
+    setStrokes(prev => {
+      const out: Stroke[] = [];
+      for (const s of prev) {
+        if (!strokeTouches(s, world, r)) {
+          out.push(s);
+          continue;
         }
-        return true;
-      })
-    );
+        if (eraseMode === 'stroke') continue; // whole stroke goes
+
+        // Partial: cut out the part under the eraser and keep what's left as separate strokes
+        let piece: Point[] = [];
+        const flush = () => {
+          if (piece.length >= 2) out.push({ id: strokeIdRef.current++, color: s.color, points: piece });
+          piece = [];
+        };
+        for (const p of densify(s.points, r / 3)) {
+          if (Math.hypot(p.x - world.x, p.y - world.y) <= r) flush();
+          else piece.push(p);
+        }
+        flush();
+      }
+      return out;
+    });
   };
 
   // ---- Pointer handling -------------------------------------------------
@@ -244,6 +288,7 @@ export const WorkArea: React.FC<WorkAreaProps> = ({ nodes, variables, highlighte
     // Stop the browser from starting a text selection across the page while drawing/panning
     e.preventDefault();
     window.getSelection()?.removeAllRanges();
+    setEraseMenuOpen(false);
     const target = e.currentTarget as HTMLElement;
     const wantsPan = e.button === 1 || spaceHeld || (tool === 'select' && e.button === 0);
     if (wantsPan) {
@@ -495,9 +540,36 @@ export const WorkArea: React.FC<WorkAreaProps> = ({ nodes, variables, highlighte
             aria-label={`${c.name} pen`}
           />
         ))}
-        <button className={tool === 'eraser' ? 'active' : ''} onClick={() => setTool('eraser')} title="Eraser (E)">
-          Erase
-        </button>
+        <div className="wb-dropdown">
+          <button
+            className={tool === 'eraser' ? 'active' : ''}
+            onClick={() => {
+              setTool('eraser');
+              setEraseMenuOpen(open => (tool === 'eraser' ? !open : true));
+            }}
+            title="Eraser (E). Click to choose whole-stroke or partial"
+          >
+            Erase{tool === 'eraser' ? (eraseMode === 'partial' ? ': Partial' : ': Stroke') : ''} ▾
+          </button>
+          {eraseMenuOpen && (
+            <div className="wb-menu">
+              <button
+                className={eraseMode === 'stroke' ? 'selected' : ''}
+                onClick={() => { setEraseMode('stroke'); setTool('eraser'); setEraseMenuOpen(false); }}
+              >
+                <strong>Whole stroke</strong>
+                <span>Removes any line you touch</span>
+              </button>
+              <button
+                className={eraseMode === 'partial' ? 'selected' : ''}
+                onClick={() => { setEraseMode('partial'); setTool('eraser'); setEraseMenuOpen(false); }}
+              >
+                <strong>Partial</strong>
+                <span>Rubs out only what's under the eraser</span>
+              </button>
+            </div>
+          )}
+        </div>
         <button className={tool === 'laser' ? 'active' : ''} onClick={() => setTool('laser')} title="Laser pointer (L)">
           Laser
         </button>
@@ -507,7 +579,7 @@ export const WorkArea: React.FC<WorkAreaProps> = ({ nodes, variables, highlighte
           {Math.round(view.scale * 100)}%
         </button>
         <button onClick={() => zoomCenter(1.2)} title="Zoom in (+)">+</button>
-        <button onClick={fitToContent} title="Fit everything on screen (F)">Fit</button>
+        <button onClick={fitToContent} title="Bring everything back into view (R)">Re-centre</button>
         <div className="wb-sep" />
         <button onClick={() => setStrokes([])} disabled={strokes.length === 0} title="Clear all drawings">
           Clear ink
