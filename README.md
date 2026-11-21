@@ -8,7 +8,9 @@ An interactive, step-by-step visualiser for singly linked lists in C built to he
 
 ## Features
 
-### Interactive Work Area
+### Interactive Work Area (Whiteboard)
+- **Infinite canvas** — drag empty space to pan (or hold `Space` / use the middle mouse button with any tool), scroll to zoom around the cursor, and press **Fit** (`F`) to frame everything.
+- **Drawing tools** — pen in red, green or yellow (`P`, or `1` / `2` / `3`), eraser that removes whole strokes (`E`), and a fading laser pointer (`L`). **Move** (`V`) goes back to dragging nodes. Drawings stay put in canvas space, so they zoom and pan with the nodes.
 - **Draggable nodes** — grab any node and reposition it freely on the canvas. All pointer arrows update in real time as you drag.
 - **Live pointer arrows** — SVG arrows connect `node->next` to its target's memory address header. Tail nodes show an explicit `NULL` block.
 - **Reorder button** — instantly snaps the list into a clean left-to-right linear layout, following the `next` chain from `head`.
